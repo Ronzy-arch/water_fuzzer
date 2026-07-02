@@ -12,6 +12,7 @@ import aiohttp
 from urllib.parse import urlparse, quote
 from typing import List, Dict, Any, Tuple, Optional
 from collections import Counter
+from functools import lru_cache
 import config
 
 logger = logging.getLogger("water_fuzzer.core")
@@ -19,9 +20,6 @@ logger = logging.getLogger("water_fuzzer.core")
 # Pre-compile regex patterns once at module load time (avoid recompilation per call)
 PAYLOAD_CLEAN_REGEX = re.compile(r'^[`"\'\\]|[`"\'\\]$')
 FILENAME_CLEAN_REGEX = re.compile(r'[^a-zA-Z0-9]')
-
-# Entropy cache to avoid recalculating the same text
-_entropy_cache: Dict[str, float] = {}
 
 class CoreAuditor:
     """
@@ -71,6 +69,7 @@ class CoreAuditor:
         self._cached_cookies: Optional[str] = None
         self._cached_proxies: Optional[List[str]] = None
         self._cookie_load_time: float = 0.0
+        self._cookie_file_mtime: float = 0.0  # Track file modification time
 
     def _get_dynamic_request_identity(self) -> Dict[str, str]:
         """V18.6 CONCURRENT ENGINE: Mencabut identitas browser secara instan untuk korutin paralel."""
@@ -87,19 +86,31 @@ class CoreAuditor:
             "X-Impersonate-Code": identity["impersonate"]
         }
         
-        # Load cookies asynchronously once, cache for 5 minutes
+        # Load cookies asynchronously once, cache for 5 minutes or if file changed
         current_time = time.time()
-        if self._cached_cookies is None or (current_time - self._cookie_load_time) > 300:
-            if os.path.exists("cookie.txt"):
-                try:
-                    import aiofiles
-                    async with aiofiles.open("cookie.txt", "r", encoding="utf-8") as f:
-                        cookie_data = await f.read()
-                        self._cached_cookies = cookie_data.strip()
-                        self._cookie_load_time = current_time
-                except Exception as e:
-                    logger.debug(f"Failed to load cookies: {e}")
+        cookie_file = "cookie.txt"
+        
+        try:
+            file_mtime = os.path.getmtime(cookie_file) if os.path.exists(cookie_file) else 0
+            cache_expired = (current_time - self._cookie_load_time) > 300
+            file_changed = file_mtime != self._cookie_file_mtime
+            
+            if self._cached_cookies is None or cache_expired or file_changed:
+                if os.path.exists(cookie_file):
+                    try:
+                        import aiofiles
+                        async with aiofiles.open(cookie_file, "r", encoding="utf-8") as f:
+                            cookie_data = await f.read()
+                            self._cached_cookies = cookie_data.strip()
+                            self._cookie_load_time = current_time
+                            self._cookie_file_mtime = file_mtime
+                    except Exception as e:
+                        logger.debug(f"Failed to load cookies: {e}")
+                        self._cached_cookies = ""
+                else:
                     self._cached_cookies = ""
+        except Exception as e:
+            logger.debug(f"Error checking cookie file: {e}")
         
         if self._cached_cookies:
             headers["Cookie"] = self._cached_cookies
@@ -139,6 +150,7 @@ class CoreAuditor:
                 
                 self._cached_cookies = cookie_string
                 self._cookie_load_time = time.time()
+                self._cookie_file_mtime = os.path.getmtime("cookie.txt")
                 return {"Cookie": cookie_string}
             else:
                 print(f"[-] TLS Impersonator [{identity['name']}]: Saringan kaku Turnstile aktif.")
@@ -166,41 +178,53 @@ class CoreAuditor:
         
         return random.choice(self._cached_proxies) if self._cached_proxies else None
 
+    @staticmethod
+    @lru_cache(maxsize=1000)
+    def _calculate_content_entropy_cached(text_hash: str, text_len: int, entropy_precalc: str) -> float:
+        """LRU-cached entropy calculation using hash and precalculated data."""
+        if not entropy_precalc:
+            return 0.0
+        
+        # Parse precalculated entropy string (format: "freq1:count1,freq2:count2,...")
+        try:
+            entropy = 0.0
+            total_chars = text_len
+            for item in entropy_precalc.split(','):
+                if ':' in item:
+                    _, count = map(int, item.split(':'))
+                    p = count / total_chars
+                    entropy -= p * math.log2(p)
+            return round(entropy, 4)
+        except Exception:
+            return 0.0
+
     def calculate_content_entropy(self, text: str, sample_size: int = 5000) -> float:
         """
         Optimized entropy calculation:
-        - Uses Counter for O(n) frequency calculation (much faster than manual dict)
-        - Samples text for large responses to reduce CPU waste
-        - Caches results to avoid recalculation
+        - Uses Counter for O(n) frequency calculation
+        - Samples text intelligently (start + end) to detect embedded payloads
+        - Uses LRU cache with hash-based keys to avoid collisions
+        - Reduced CPU waste for large responses
         """
         if not text:
             return 0.0
         
-        # Check cache first (MD5 hash of text)
-        text_key = hashlib.md5(text[:100].encode()).hexdigest()  # Hash first 100 chars only
-        if text_key in _entropy_cache:
-            return _entropy_cache[text_key]
-        
-        # Sample text for large responses to avoid CPU waste
+        # For large text, combine start and end samples to catch both headers and payload echoes
         if len(text) > sample_size:
-            text = text[:sample_size]
+            half = sample_size // 2
+            text = text[:half] + text[-half:]
         
-        # Use Counter for efficient O(n) frequency calculation (vs manual dict loop)
+        # Full text hash to avoid collisions
+        text_hash = hashlib.sha256(text.encode()).hexdigest()
+        
+        # Use Counter for efficient O(n) frequency calculation
         frequencies = Counter(text)
         
-        entropy = 0.0
-        total_chars = len(text)
+        # Pre-calculate entropy components and convert to string for cache key
+        entropy_precalc = ','.join([f"{char}:{count}" for char, count in frequencies.items()])
         
-        # Vectorized entropy calculation
-        for count in frequencies.values():
-            p = count / total_chars
-            entropy -= p * math.log2(p)
-        
-        result = round(entropy, 4)
-        
-        # Cache result (limit cache to 1000 entries to prevent memory bloat)
-        if len(_entropy_cache) < 1000:
-            _entropy_cache[text_key] = result
+        # Use cached calculation
+        result = self._calculate_content_entropy_cached(text_hash, len(text), entropy_precalc)
         
         return result
 
