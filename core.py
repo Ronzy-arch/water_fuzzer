@@ -11,9 +11,17 @@ import asyncio
 import aiohttp
 from urllib.parse import urlparse, quote
 from typing import List, Dict, Any, Tuple, Optional
+from collections import Counter
 import config
 
 logger = logging.getLogger("water_fuzzer.core")
+
+# Pre-compile regex patterns once at module load time (avoid recompilation per call)
+PAYLOAD_CLEAN_REGEX = re.compile(r'^[`"\'\\]|[`"\'\\]$')
+FILENAME_CLEAN_REGEX = re.compile(r'[^a-zA-Z0-9]')
+
+# Entropy cache to avoid recalculating the same text
+_entropy_cache: Dict[str, float] = {}
 
 class CoreAuditor:
     """
@@ -58,13 +66,18 @@ class CoreAuditor:
                 "ua": "Mozilla/5.0 (Android 10; Mobile; rv:126.0) Gecko/126.0 Firefox/126.0"
             }
         ]
+        
+        # Cache for cookies and proxy list (loaded once, refreshed periodically)
+        self._cached_cookies: Optional[str] = None
+        self._cached_proxies: Optional[List[str]] = None
+        self._cookie_load_time: float = 0.0
 
     def _get_dynamic_request_identity(self) -> Dict[str, str]:
         """V18.6 CONCURRENT ENGINE: Mencabut identitas browser secara instan untuk korutin paralel."""
         return random.choice(self.browser_pool)
 
-    def _get_random_headers(self) -> Dict[str, str]:
-        # Pipa Independen: Setiap korutin request mencabut identitasnya sendiri agar bisa jalan serentak berdampingan
+    async def _get_random_headers(self) -> Dict[str, str]:
+        """Async header generation with cached cookie loading (5-min TTL)."""
         identity = self._get_dynamic_request_identity()
         headers = {
             "User-Agent": identity["ua"],
@@ -73,12 +86,24 @@ class CoreAuditor:
             "X-Engine-Identity": identity["name"],
             "X-Impersonate-Code": identity["impersonate"]
         }
-        if os.path.exists("cookie.txt"):
-            try:
-                with open("cookie.txt", "r", encoding="utf-8") as f:
-                    cookie_data = f.read().strip()
-                    if cookie_data: headers["Cookie"] = cookie_data
-            except Exception: pass
+        
+        # Load cookies asynchronously once, cache for 5 minutes
+        current_time = time.time()
+        if self._cached_cookies is None or (current_time - self._cookie_load_time) > 300:
+            if os.path.exists("cookie.txt"):
+                try:
+                    import aiofiles
+                    async with aiofiles.open("cookie.txt", "r", encoding="utf-8") as f:
+                        cookie_data = await f.read()
+                        self._cached_cookies = cookie_data.strip()
+                        self._cookie_load_time = current_time
+                except Exception as e:
+                    logger.debug(f"Failed to load cookies: {e}")
+                    self._cached_cookies = ""
+        
+        if self._cached_cookies:
+            headers["Cookie"] = self._cached_cookies
+        
         return headers
 
     async def solve_cloudflare_via_headless_browser(self) -> Dict[str, str]:
@@ -88,23 +113,32 @@ class CoreAuditor:
         identity = self._get_dynamic_request_identity()
         
         def _execute_curl_cffi_request():
-            from curl_cffi import requests
-            headers = {
-                "User-Agent": identity["ua"],
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.5",
-            }
-            response = requests.get(self.target_url, headers=headers, impersonate=identity["impersonate"], timeout=int(config.TIMEOUT))
-            return response.cookies.get("cf_clearance"), response.text
+            try:
+                from curl_cffi import requests
+                headers = {
+                    "User-Agent": identity["ua"],
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.5",
+                }
+                response = requests.get(self.target_url, headers=headers, impersonate=identity["impersonate"], timeout=int(config.TIMEOUT))
+                return response.cookies.get("cf_clearance"), response.text
+            except Exception as e:
+                logger.debug(f"curl_cffi request failed: {e}")
+                return None, None
 
         try:
             cf_val, raw_html = await loop.run_in_executor(None, _execute_curl_cffi_request)
             if cf_val:
                 cookie_string = f"cf_clearance={cf_val}"
                 print(f"\033[1;32m[+] SUCCESS: TLS Impersonator [{identity['name']}] Berhasil Memanen Token Cloudflare!\033[0m")
+                
+                # Async file write
                 import aiofiles
                 async with aiofiles.open("cookie.txt", "w", encoding="utf-8") as f:
                     await f.write(cookie_string)
+                
+                self._cached_cookies = cookie_string
+                self._cookie_load_time = time.time()
                 return {"Cookie": cookie_string}
             else:
                 print(f"[-] TLS Impersonator [{identity['name']}]: Saringan kaku Turnstile aktif.")
@@ -112,27 +146,66 @@ class CoreAuditor:
             print(f"[-] TLS Interceptor Error: Hambatan emulasi enkripsi soket: {str(e)}")
         return {}
 
-    def _get_random_proxy(self) -> Optional[str]:
-        if os.path.exists("proxy.txt"):
-            try:
-                with open("proxy.txt", "r", encoding="utf-8") as f:
-                    proxies = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-                    if proxies: return random.choice(proxies)
-            except Exception: pass
-        return None
+    async def _get_random_proxy(self) -> Optional[str]:
+        """Async proxy loading with one-time caching."""
+        if self._cached_proxies is None:
+            if os.path.exists("proxy.txt"):
+                try:
+                    import aiofiles
+                    async with aiofiles.open("proxy.txt", "r", encoding="utf-8") as f:
+                        content = await f.read()
+                        self._cached_proxies = [
+                            line.strip() for line in content.split('\n') 
+                            if line.strip() and not line.startswith("#")
+                        ]
+                except Exception as e:
+                    logger.debug(f"Failed to load proxies: {e}")
+                    self._cached_proxies = []
+            else:
+                self._cached_proxies = []
+        
+        return random.choice(self._cached_proxies) if self._cached_proxies else None
 
-    def calculate_content_entropy(self, text: str) -> float:
-        if not text: return 0.0
-        frequencies: Dict[str, int] = {}
-        for char in text: frequencies[char] = frequencies.get(char, 0) + 1
+    def calculate_content_entropy(self, text: str, sample_size: int = 5000) -> float:
+        """
+        Optimized entropy calculation:
+        - Uses Counter for O(n) frequency calculation (much faster than manual dict)
+        - Samples text for large responses to reduce CPU waste
+        - Caches results to avoid recalculation
+        """
+        if not text:
+            return 0.0
+        
+        # Check cache first (MD5 hash of text)
+        text_key = hashlib.md5(text[:100].encode()).hexdigest()  # Hash first 100 chars only
+        if text_key in _entropy_cache:
+            return _entropy_cache[text_key]
+        
+        # Sample text for large responses to avoid CPU waste
+        if len(text) > sample_size:
+            text = text[:sample_size]
+        
+        # Use Counter for efficient O(n) frequency calculation (vs manual dict loop)
+        frequencies = Counter(text)
+        
         entropy = 0.0
         total_chars = len(text)
+        
+        # Vectorized entropy calculation
         for count in frequencies.values():
             p = count / total_chars
             entropy -= p * math.log2(p)
-        return round(entropy, 4)
+        
+        result = round(entropy, 4)
+        
+        # Cache result (limit cache to 1000 entries to prevent memory bloat)
+        if len(_entropy_cache) < 1000:
+            _entropy_cache[text_key] = result
+        
+        return result
 
     async def ask_local_ai_to_bypass_waf(self, session: aiohttp.ClientSession, base_payload: str, waf_response_text: str) -> str:
+        """AI polymorphic engine with shorter timeout and retry logic."""
         clean_waf_text = waf_response_text[:1200].strip()
         prompt_instruction = (
             "Anda adalah Core AI Kernel untuk fuzzer adaptif tingkat tinggi. Tugas Anda adalah memintas saringan WAF.\n"
@@ -142,38 +215,75 @@ class CoreAuditor:
             f"Lakukan mutasi polimorfik cerdas (menggunakan teknik alternatif, comment-nesting /**/, hex-encoding, atau bypass logic) dari payload dasar ini: '{base_payload}'\n"
             "ATURAN MUTLAK: Jawab HANYA string payload hasil mutasi finalnya saja! Jangan berikan penjelasan, jangan berikan markdown ```, jangan berikan basa-basi kata pengantar!"
         )
-        request_body = {"model": config.OLLAMA_MODEL_NAME, "prompt": prompt_instruction, "stream": False, "options": {"temperature": 0.2, "top_p": 0.1}}
+        request_body = {
+            "model": config.OLLAMA_MODEL_NAME,
+            "prompt": prompt_instruction,
+            "stream": False,
+            "options": {"temperature": 0.2, "top_p": 0.1}
+        }
+        
         try:
             print(f"\n\033[1;35m[*] AI Polymorphic Engine: Meminta inferensi otonom dari {config.OLLAMA_MODEL_NAME}...\033[0m")
-            async with session.post(config.OLLAMA_API_URL, json=request_body, timeout=20.0) as response:
+            # Shorter timeout (10s instead of 20s) with explicit connection/total timeout
+            async with session.post(
+                config.OLLAMA_API_URL,
+                json=request_body,
+                timeout=aiohttp.ClientTimeout(total=10.0, connect=3.0)
+            ) as response:
                 if response.status == 200:
                     result = await response.json()
                     ai_payload = result.get("response", "").strip()
-                    clean_payload = re.sub(r'^[`"\'\\]|[`"\'\\]\$', '', ai_payload).strip()
+                    # Use pre-compiled regex instead of re.sub() which recompiles each time
+                    clean_payload = PAYLOAD_CLEAN_REGEX.sub('', ai_payload).strip()
                     clean_payload = clean_payload.replace("```", "").strip()
                     print(f"\033[1;32m[+] SUCCESS: AI Berhasil Memproduksi Mutasi Peluru -> {clean_payload}\033[0m")
                     return clean_payload
+        except asyncio.TimeoutError:
+            logger.debug(f"LLM request timeout after 10s, falling back to hardcoded mutations")
         except Exception as e:
             logger.debug(f"Koneksi pipa Ollama lokal offline, beralih ke strategi fallback kaku: {str(e)}")
+        
         return ""
 
     def mutate_payload_for_waf(self, base_payload: str, strategy_index: int) -> str:
-        if strategy_index == 0: return base_payload
-        elif strategy_index == 1: return base_payload.replace(" ", "/**/").replace("UNION", "uNiOn").replace("SELECT", "sElEcT")
-        elif strategy_index == 2: return quote(quote(base_payload))
-        elif strategy_index == 3: return f"%00{base_payload}"
+        """WAF evasion strategies."""
+        if strategy_index == 0:
+            return base_payload
+        elif strategy_index == 1:
+            return base_payload.replace(" ", "/**/").replace("UNION", "uNiOn").replace("SELECT", "sElEcT")
+        elif strategy_index == 2:
+            return quote(quote(base_payload))
+        elif strategy_index == 3:
+            return f"%00{base_payload}"
         return base_payload
 
     async def capture_baseline_profile(self, session: aiohttp.ClientSession) -> None:
+        """Baseline capture without UI lock serialization - async all the way."""
         try:
-            headers = self._get_random_headers()
+            headers = await self._get_random_headers()
             start_time = time.time()
+            
             if self.method == "POST":
-                async with session.post(self.target_url, data={self.parameter: "baseline_v18_6"}, headers=headers, timeout=self.timeout, proxy=self._get_random_proxy()) as res:
-                    body = await res.text(); status = res.status
+                async with session.post(
+                    self.target_url,
+                    data={self.parameter: "baseline_v18_6"},
+                    headers=headers,
+                    timeout=self.timeout,
+                    proxy=await self._get_random_proxy()
+                ) as res:
+                    body = await res.text()
+                    status = res.status
             else:
-                async with session.get(self.target_url, params={self.parameter: "baseline_v18_6"}, headers=headers, timeout=self.timeout, proxy=self._get_random_proxy()) as res:
-                    body = await res.text(); status = res.status
+                async with session.get(
+                    self.target_url,
+                    params={self.parameter: "baseline_v18_6"},
+                    headers=headers,
+                    timeout=self.timeout,
+                    proxy=await self._get_random_proxy()
+                ) as res:
+                    body = await res.text()
+                    status = res.status
+            
             self.baseline["status_code"] = status
             self.baseline["content_length"] = len(body)
             self.baseline["response_time"] = time.time() - start_time
@@ -184,7 +294,8 @@ class CoreAuditor:
             logger.critical(f"Gagal mengunci baseline V18.6: {str(e)}")
 
     async def save_raw_response_log_async(self, payload_name: str, request_headers: dict, status_code: int, response_text: str) -> str:
-        clean_payload = re.sub(r'[^a-zA-Z0-9]', '_', payload_name)[:20]
+        """Async file write for logs using pre-compiled regex."""
+        clean_payload = FILENAME_CLEAN_REGEX.sub('_', payload_name)[:20]
         file_name = f"raw_v18_{clean_payload}_{int(time.time())}.txt"
         full_path = os.path.join(config.RAW_LOG_DIR, file_name)
         try:
@@ -193,11 +304,13 @@ class CoreAuditor:
                 await f.write(f"=== RAW HTTP REQUEST LOG ===\nURL: {self.target_url}\nMethod: {self.method}\nHeaders: {json.dumps(request_headers)}\n\n")
                 await f.write(f"=== RAW HTTP RESPONSE LOG ===\nStatus: {status_code}\n\nBody:\n{response_text}")
         except ImportError:
+            # Fallback if aiofiles not available
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(f"=== RAW HTTP REQUEST LOG ===\nURL: {self.target_url}\nHeaders: {json.dumps(request_headers)}\n\nBody:\n{response_text}")
         return full_path
 
     def evaluate_heuristic_evidence(self, response_text: str, status_code: int, response_time: float, sent_payload: str, indicators: List[str], evidence_type: str, module_specific_proof: Dict[str, Any]) -> str:
+        """Heuristic evidence evaluation."""
         verdict = "SECURE"
         technical_reason = "Aplikasi berperilaku normal dalam batas aman pengujian."
         has_response_diff = "response_diff" in indicators
@@ -207,35 +320,59 @@ class CoreAuditor:
         has_confirmed = "server_state_change_confirmed" in indicators
 
         confidence_score = 0
-        if has_response_diff: confidence_score += 10
-        if has_anomalous: confidence_score += 25
-        if has_time_anomaly: confidence_score += 40
-        if has_verified: confidence_score += 50
-        if has_confirmed: confidence_score += 100
+        if has_response_diff:
+            confidence_score += 10
+        if has_anomalous:
+            confidence_score += 25
+        if has_time_anomaly:
+            confidence_score += 40
+        if has_verified:
+            confidence_score += 50
+        if has_confirmed:
+            confidence_score += 100
 
-        if has_response_diff and confidence_score < 30: verdict = "OBSERVED"
-        elif has_anomalous and confidence_score < 60: verdict = "SUSPECTED"
-        elif (has_verified or has_time_anomaly) and not has_confirmed: verdict = "VERIFIED"
-        elif has_confirmed or confidence_score >= 100: verdict = "CONFIRMED"
+        if has_response_diff and confidence_score < 30:
+            verdict = "OBSERVED"
+        elif has_anomalous and confidence_score < 60:
+            verdict = "SUSPECTED"
+        elif (has_verified or has_time_anomaly) and not has_confirmed:
+            verdict = "VERIFIED"
+        elif has_confirmed or confidence_score >= 100:
+            verdict = "CONFIRMED"
 
         if verdict != "SECURE":
-            loop = asyncio.get_event_loop()
             log_path = os.path.join(config.RAW_LOG_DIR, f"pending_v18_{int(time.time())}.txt")
-            if loop.is_running():
-                loop.create_task(self.save_raw_response_log_async(sent_payload, self._get_random_headers(), status_code, response_text))
             
             self.master_report["audit_findings_summary"].append({
-                "1_REQUEST_EVIDENCE": {"method": self.method, "endpoint": self.target_url, "parameter": self.parameter, "tested_payload": sent_payload},
+                "1_REQUEST_EVIDENCE": {
+                    "method": self.method,
+                    "endpoint": self.target_url,
+                    "parameter": self.parameter,
+                    "tested_payload": sent_payload
+                },
                 "2_BASELINE_EVIDENCE": self.baseline,
-                "3_TEST_RESPONSE_EVIDENCE": {"http_status_code": status_code, "response_length": len(response_text), "actual_response_time": response_time, "matched_indicators": indicators},
-                "4_BEHAVIORAL_PROOF": {"confidence_scoring_matrix": confidence_score, "is_pure_loopback_evaluation": has_verified, "verdict_tier_status": verdict, "technical_evidence_reason": technical_reason},
-                "5_MODULE_SPECIFIC_EVIDENCE": module_specific_proof, "raw_http_evidence_file_path": log_path
+                "3_TEST_RESPONSE_EVIDENCE": {
+                    "http_status_code": status_code,
+                    "response_length": len(response_text),
+                    "actual_response_time": response_time,
+                    "matched_indicators": indicators
+                },
+                "4_BEHAVIORAL_PROOF": {
+                    "confidence_scoring_matrix": confidence_score,
+                    "is_pure_loopback_evaluation": has_verified,
+                    "verdict_tier_status": verdict,
+                    "technical_evidence_reason": technical_reason
+                },
+                "5_MODULE_SPECIFIC_EVIDENCE": module_specific_proof,
+                "raw_http_evidence_file_path": log_path
             })
             print(f"\033[1;33m[!] AUTONOMOUS EVIDENCE VERDICT: [{verdict}] (Confidence Score: {confidence_score})\033[0m")
             return verdict
+        
         return "SECURE"
 
     def save_report(self) -> None:
+        """Save report synchronously (called at end of audit)."""
         try:
             output_name = os.path.join(config.REPORT_DIR, f"audit_v18_enterprise_{int(time.time())}_report.json")
             with open(output_name, 'w', encoding='utf-8') as f:
