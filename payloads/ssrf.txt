@@ -1,0 +1,6 @@
+# === KAMUS AMUNISI V8: SERVER-SIDE REQUEST FORGERY ===
+http://127.0.0.1:80
+http://localhost:80
+http://169.254.169
+http://[::]:80
+http://127.0.0.1:3306

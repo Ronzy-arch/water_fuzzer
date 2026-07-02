@@ -1,0 +1,6 @@
+# === KAMUS AMUNISI V8: OPEN REDIRECTION ===
+https://google.com
+//google.com
+/\google.com
+/https://google.com
+https:google.com

