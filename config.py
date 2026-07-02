@@ -10,16 +10,23 @@ SERVER_LOG_DIR: str = os.path.join(BASE_DIR, "server_logs_capture")
 
 # TIMEOUT & AMBANG BATAS JARINGAN ASINKRONUS MASAL V18
 TIMEOUT: float = 15.0
-MAX_CONCURRENT_TASKS: int = 50
+MAX_CONCURRENT_TASKS: int = 3  # REDUCED: Prevent task stacking
+MAX_SHELL_COMMANDS_QUEUE: int = 50  # Queue max commands
+SHELL_RESPONSE_TIMEOUT: float = 10.0  # Shell command timeout
 TIME_DELAY_THRESHOLD: float = 5.0
 OOB_GATEWAY: str = "http://waterfuzzer.local"
+
+# SHELL SESSION MANAGEMENT
+SHELL_SESSION_LOCK_TIMEOUT: float = 30.0  # Max time for shell session
+SHELL_IDLE_TIMEOUT: float = 300.0  # 5 minutes idle timeout
+MAX_CONCURRENT_SHELLS: int = 1  # Only one shell at a time
 
 # INTERFACES API OLLAMA LOKAL (V18 POLYMORPHIC ENGINE)
 OLLAMA_API_URL: str = "http://localhost:11434/api/generate"
 OLLAMA_MODEL_NAME: str = "deepseek-coder:1.3b"
 
 # KUNCI GHOST PROXIES LIMITER
-TCP_POOL_LIMIT: int = 100
+TCP_POOL_LIMIT: int = 50  # REDUCED: Prevent connection exhaustion
 TCP_POOL_TTL: int = 300
 
 # CONFIG POIN 1: PENYAMARAN SIDIK JARI BINER BROWSER (ANTI-GUI/BROWSERLESS)
