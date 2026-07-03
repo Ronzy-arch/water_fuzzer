@@ -1,4 +1,7 @@
-# core.py
+# core.py - WATER FUZZER V2.0 CORE AUDITOR ENGINE
+# Lapisan 3: Hakim Pemicu Gerbang (Gate Trigger Judge)
+# Enhanced data isolation & parsing with boundary token mechanism
+
 import json
 import logging
 import re
@@ -17,28 +20,39 @@ import config
 
 logger = logging.getLogger("water_fuzzer.core")
 
-# Pre-compile regex patterns once at module load time (avoid recompilation per call)
+# Pre-compile regex patterns (avoid recompilation per call)
 PAYLOAD_CLEAN_REGEX = re.compile(r'^[`"\'\\]|[`"\'\\]$')
-FILENAME_CLEAN_REGEX = re.compile(r'[^a-zA-Z0-9]')
+FILENAME_CLEAN_REGEX = re.compile(r'[^a-zA-Z0-9_-]')
+HTML_TAG_REGEX = re.compile(r'<[^>]+>', re.DOTALL)
+BOUNDARY_REGEX = re.compile(config.REGEX_BOUNDARY_PATTERN, re.DOTALL)
 
 class CoreAuditor:
     """
-    Jantung Utama Orkestrator V18.6 (Concurrent Multi-Fingerprint Proxy Engine).
-    Secara dinamis mengocok dan melepas sidik jari TLS dari Chrome dan Firefox serentak
-    pada setiap korutin request jaringan secara independen dan bersamaan.
+    WATER FUZZER V2.0 - Jantung Utama Orkestrator
+    (Concurrent Multi-Fingerprint Proxy Engine dengan Stateful Shell Support)
+    
+    Lapisan 3 dari 3: Hakim Pemicu Gerbang
+    Memutuskan kapan membuka interactive shell berdasarkan evidence evaluation
     """
     def __init__(self, target_url: str, parameter: str, method: str = "POST") -> None:
         self.target_url: str = target_url
         self.parameter: str = parameter
         self.method: str = method.upper()
         self.timeout: float = config.TIMEOUT
+        self.framework_version: str = config.FRAMEWORK_VERSION
         
+        # Create directories
         os.makedirs(config.REPORT_DIR, exist_ok=True)
         os.makedirs(config.RAW_LOG_DIR, exist_ok=True)
         os.makedirs(config.SERVER_LOG_DIR, exist_ok=True)
+        os.makedirs(config.SHELL_SESSION_DIR, exist_ok=True)
         
         self.baseline: Dict[str, Any] = {
-            "status_code": 200, "content_length": 0, "response_time": 0.0, "entropy_score": 0.0, "captured": False
+            "status_code": 200, 
+            "content_length": 0, 
+            "response_time": 0.0, 
+            "entropy_score": 0.0, 
+            "captured": False
         }
 
         self.ai_seed: str = str(time.time()) + str(random.randint(1000, 9999))
@@ -46,8 +60,12 @@ class CoreAuditor:
 
         self.master_report: Dict[str, Any] = {
             "audit_metadata": {
-                "target_url": self.target_url, "tested_parameter": self.parameter, "http_method": self.method,
-                "audit_timestamp_start": time.strftime("%Y-%m-%d %H:%M:%S"), "assessment_engine": "EVIDENCE_DRIVEN_AI_ENGINE_V18_6_CONCURRENT"
+                "framework_version": self.framework_version,
+                "target_url": self.target_url, 
+                "tested_parameter": self.parameter, 
+                "http_method": self.method,
+                "audit_timestamp_start": time.strftime("%Y-%m-%d %H:%M:%S"), 
+                "assessment_engine": config.ASSESSMENT_ENGINE
             },
             "audit_findings_summary": []
         }
@@ -65,18 +83,18 @@ class CoreAuditor:
             }
         ]
         
-        # Cache for cookies and proxy list (loaded once, refreshed periodically)
+        # Cache for cookies and proxy list
         self._cached_cookies: Optional[str] = None
         self._cached_proxies: Optional[List[str]] = None
         self._cookie_load_time: float = 0.0
-        self._cookie_file_mtime: float = 0.0  # Track file modification time
+        self._cookie_file_mtime: float = 0.0
 
     def _get_dynamic_request_identity(self) -> Dict[str, str]:
-        """V18.6 CONCURRENT ENGINE: Mencabut identitas browser secara instan untuk korutin paralel."""
+        """V2.0: Mencabut identitas browser secara instan untuk korutin paralel."""
         return random.choice(self.browser_pool)
 
     async def _get_random_headers(self) -> Dict[str, str]:
-        """Async header generation with cached cookie loading (5-min TTL)."""
+        """Async header generation with cached cookie loading (TTL-based)."""
         identity = self._get_dynamic_request_identity()
         headers = {
             "User-Agent": identity["ua"],
@@ -86,13 +104,12 @@ class CoreAuditor:
             "X-Impersonate-Code": identity["impersonate"]
         }
         
-        # Load cookies asynchronously once, cache for 5 minutes or if file changed
         current_time = time.time()
         cookie_file = "cookie.txt"
         
         try:
             file_mtime = os.path.getmtime(cookie_file) if os.path.exists(cookie_file) else 0
-            cache_expired = (current_time - self._cookie_load_time) > 300
+            cache_expired = (current_time - self._cookie_load_time) > config.COOKIE_CACHE_TTL
             file_changed = file_mtime != self._cookie_file_mtime
             
             if self._cached_cookies is None or cache_expired or file_changed:
@@ -118,8 +135,8 @@ class CoreAuditor:
         return headers
 
     async def solve_cloudflare_via_headless_browser(self) -> Dict[str, str]:
-        """POIN 1 V18.6: Membakar jalur Cloudflare memakai emulasi Chrome & Firefox serentak bersamaan."""
-        print("\n\033[1;35m[*] TLS Interceptor V18.6: Menembakkan Sidik Jari CHROME & FIREFOX Serentak Bersamaan... \033[0m")
+        """POIN 1 V2.0: Membakar jalur Cloudflare memakai emulasi Chrome & Firefox serentak."""
+        print(f"\n{config.SHELL_COLOR_YELLOW}[*] TLS Interceptor V2.0: Menembakkan Sidik Jari CHROME & FIREFOX...\033[0m")
         loop = asyncio.get_running_loop()
         identity = self._get_dynamic_request_identity()
         
@@ -141,9 +158,8 @@ class CoreAuditor:
             cf_val, raw_html = await loop.run_in_executor(None, _execute_curl_cffi_request)
             if cf_val:
                 cookie_string = f"cf_clearance={cf_val}"
-                print(f"\033[1;32m[+] SUCCESS: TLS Impersonator [{identity['name']}] Berhasil Memanen Token Cloudflare!\033[0m")
+                print(f"{config.SHELL_COLOR_GREEN}[+] SUCCESS: TLS Impersonator [{identity['name']}] Cloudflare Token Acquired!{config.SHELL_COLOR_RESET}")
                 
-                # Async file write
                 import aiofiles
                 async with aiofiles.open("cookie.txt", "w", encoding="utf-8") as f:
                     await f.write(cookie_string)
@@ -153,9 +169,9 @@ class CoreAuditor:
                 self._cookie_file_mtime = os.path.getmtime("cookie.txt")
                 return {"Cookie": cookie_string}
             else:
-                print(f"[-] TLS Impersonator [{identity['name']}]: Saringan kaku Turnstile aktif.")
+                print(f"{config.SHELL_COLOR_RED}[-] TLS Impersonator [{identity['name']}]: Turnstile filter active.{config.SHELL_COLOR_RESET}")
         except Exception as e:
-            print(f"[-] TLS Interceptor Error: Hambatan emulasi enkripsi soket: {str(e)}")
+            print(f"{config.SHELL_COLOR_RED}[-] TLS Interceptor Error: {str(e)}{config.SHELL_COLOR_RESET}")
         return {}
 
     async def _get_random_proxy(self) -> Optional[str]:
@@ -185,7 +201,6 @@ class CoreAuditor:
         if not entropy_precalc:
             return 0.0
         
-        # Parse precalculated entropy string (format: "freq1:count1,freq2:count2,...")
         try:
             entropy = 0.0
             total_chars = text_len
@@ -199,45 +214,87 @@ class CoreAuditor:
             return 0.0
 
     def calculate_content_entropy(self, text: str, sample_size: int = 5000) -> float:
-        """
-        Optimized entropy calculation:
-        - Uses Counter for O(n) frequency calculation
-        - Samples text intelligently (start + end) to detect embedded payloads
-        - Uses LRU cache with hash-based keys to avoid collisions
-        - Reduced CPU waste for large responses
-        """
+        """Optimized entropy calculation with intelligent sampling."""
         if not text:
             return 0.0
         
-        # For large text, combine start and end samples to catch both headers and payload echoes
         if len(text) > sample_size:
             half = sample_size // 2
             text = text[:half] + text[-half:]
         
-        # Full text hash to avoid collisions
         text_hash = hashlib.sha256(text.encode()).hexdigest()
-        
-        # Use Counter for efficient O(n) frequency calculation
         frequencies = Counter(text)
-        
-        # Pre-calculate entropy components and convert to string for cache key
         entropy_precalc = ','.join([f"{char}:{count}" for char, count in frequencies.items()])
         
-        # Use cached calculation
-        result = self._calculate_content_entropy_cached(text_hash, len(text), entropy_precalc)
-        
-        return result
+        return self._calculate_content_entropy_cached(text_hash, len(text), entropy_precalc)
+
+    # ════════════════════════════════════════════════════════════════════════════════
+    # LAPISAN 3: DATA PARSING & ISOLATION (Boundary Token Mechanism - V2.0)
+    # ════════════════════════════════════════════════════════════════════════════════
+    
+    def _extract_command_output_with_boundary(self, response_text: str, token_start: str, token_end: str) -> Optional[str]:
+        """
+        LAPISAN 3 ENHANCED: Extract output between boundary tokens.
+        Ini adalah mekanisme isolasi data kritis untuk mencegah HTML floating.
+        """
+        try:
+            if token_start in response_text and token_end in response_text:
+                # Use pre-compiled boundary regex for performance
+                pattern = re.escape(token_start) + r"(.+?)" + re.escape(token_end)
+                match = re.search(pattern, response_text, re.DOTALL)
+                if match:
+                    extracted = match.group(1).strip()
+                    if extracted:
+                        return extracted
+        except Exception as e:
+            logger.debug(f"Boundary token extraction error: {e}")
+        return None
+
+    def _clean_and_parse_response(self, raw_response: str, max_length: int = None) -> str:
+        """
+        LAPISAN 3 ENHANCED: Clean HTML artifacts and parse response.
+        Removes HTML tags, decodes entities, limits length.
+        """
+        if max_length is None:
+            max_length = config.MAX_RESPONSE_PARSE_LENGTH
+            
+        try:
+            if not config.HTML_CLEANUP_ENABLED:
+                return raw_response[:max_length].strip()
+            
+            # Remove HTML tags
+            clean = HTML_TAG_REGEX.sub('', raw_response)
+            
+            # Decode HTML entities
+            entities = {
+                '&lt;': '<', '&gt;': '>', '&amp;': '&',
+                '&quot;': '"', '&#039;': "'", '&apos;': "'",
+                '&nbsp;': ' ', '&#x2F;': '/'
+            }
+            for entity, char in entities.items():
+                clean = clean.replace(entity, char)
+            
+            # Remove extra whitespace
+            clean = re.sub(r'\s+', ' ', clean).strip()
+            
+            return clean[:max_length].strip()
+        except Exception as e:
+            logger.debug(f"Response cleaning error: {e}")
+            return raw_response[:max_length].strip()
 
     async def ask_local_ai_to_bypass_waf(self, session: aiohttp.ClientSession, base_payload: str, waf_response_text: str) -> str:
-        """AI polymorphic engine with shorter timeout and retry logic."""
+        """AI polymorphic engine dengan timeout lebih singkat dan retry logic."""
+        if not config.ENABLE_AI_BYPASS:
+            return ""
+            
         clean_waf_text = waf_response_text[:1200].strip()
         prompt_instruction = (
-            "Anda adalah Core AI Kernel untuk fuzzer adaptif tingkat tinggi. Tugas Anda adalah memintas saringan WAF.\n"
+            "Anda adalah Core AI Kernel untuk fuzzer adaptif tingkat tinggi (V2.0). Tugas Anda adalah memintas saringan WAF.\n"
             "Analisis potongan bodi respons sensor Firewall berikut:\n"
             f"'{clean_waf_text}'\n\n"
-            "Berdasarkan signature WAF di atas, deteksi karakter atau kata yang dilarang (misal: spasi, tanda petik, atau SELECT).\n"
-            f"Lakukan mutasi polimorfik cerdas (menggunakan teknik alternatif, comment-nesting /**/, hex-encoding, atau bypass logic) dari payload dasar ini: '{base_payload}'\n"
-            "ATURAN MUTLAK: Jawab HANYA string payload hasil mutasi finalnya saja! Jangan berikan penjelasan, jangan berikan markdown ```, jangan berikan basa-basi kata pengantar!"
+            "Berdasarkan signature WAF di atas, deteksi karakter atau kata yang dilarang.\n"
+            f"Lakukan mutasi polimorfik cerdas dari payload dasar ini: '{base_payload}'\n"
+            "ATURAN MUTLAK: Jawab HANYA string payload hasil mutasi finalnya saja!"
         )
         request_body = {
             "model": config.OLLAMA_MODEL_NAME,
@@ -247,25 +304,23 @@ class CoreAuditor:
         }
         
         try:
-            print(f"\n\033[1;35m[*] AI Polymorphic Engine: Meminta inferensi otonom dari {config.OLLAMA_MODEL_NAME}...\033[0m")
-            # Shorter timeout (10s instead of 20s) with explicit connection/total timeout
+            print(f"\n{config.SHELL_COLOR_YELLOW}[*] AI Polymorphic Engine: Requesting inference from {config.OLLAMA_MODEL_NAME}...{config.SHELL_COLOR_RESET}")
             async with session.post(
                 config.OLLAMA_API_URL,
                 json=request_body,
-                timeout=aiohttp.ClientTimeout(total=10.0, connect=3.0)
+                timeout=aiohttp.ClientTimeout(total=config.OLLAMA_INFERENCE_TIMEOUT, connect=3.0)
             ) as response:
                 if response.status == 200:
                     result = await response.json()
                     ai_payload = result.get("response", "").strip()
-                    # Use pre-compiled regex instead of re.sub() which recompiles each time
                     clean_payload = PAYLOAD_CLEAN_REGEX.sub('', ai_payload).strip()
                     clean_payload = clean_payload.replace("```", "").strip()
-                    print(f"\033[1;32m[+] SUCCESS: AI Berhasil Memproduksi Mutasi Peluru -> {clean_payload}\033[0m")
+                    print(f"{config.SHELL_COLOR_GREEN}[+] AI Mutation: {clean_payload}{config.SHELL_COLOR_RESET}")
                     return clean_payload
         except asyncio.TimeoutError:
-            logger.debug(f"LLM request timeout after 10s, falling back to hardcoded mutations")
+            logger.debug(f"LLM timeout, using fallback mutations")
         except Exception as e:
-            logger.debug(f"Koneksi pipa Ollama lokal offline, beralih ke strategi fallback kaku: {str(e)}")
+            logger.debug(f"Ollama connection failed: {str(e)}")
         
         return ""
 
@@ -282,7 +337,7 @@ class CoreAuditor:
         return base_payload
 
     async def capture_baseline_profile(self, session: aiohttp.ClientSession) -> None:
-        """Baseline capture without UI lock serialization - async all the way."""
+        """Baseline capture - fully async without serialization."""
         try:
             headers = await self._get_random_headers()
             start_time = time.time()
@@ -290,7 +345,7 @@ class CoreAuditor:
             if self.method == "POST":
                 async with session.post(
                     self.target_url,
-                    data={self.parameter: "baseline_v18_6"},
+                    data={self.parameter: "baseline_v2_0"},
                     headers=headers,
                     timeout=self.timeout,
                     proxy=await self._get_random_proxy()
@@ -300,7 +355,7 @@ class CoreAuditor:
             else:
                 async with session.get(
                     self.target_url,
-                    params={self.parameter: "baseline_v18_6"},
+                    params={self.parameter: "baseline_v2_0"},
                     headers=headers,
                     timeout=self.timeout,
                     proxy=await self._get_random_proxy()
@@ -313,14 +368,14 @@ class CoreAuditor:
             self.baseline["response_time"] = time.time() - start_time
             self.baseline["entropy_score"] = self.calculate_content_entropy(body)
             self.baseline["captured"] = True
-            print(f"\033[1;32m[+] ASYNC BASELINE LOCKED: Status = {status} | Entropy = {self.baseline['entropy_score']} | Executed as Multi-Fingerprint Core\033[0m")
+            print(f"{config.SHELL_COLOR_GREEN}[+] BASELINE V2.0 LOCKED: Status={status} | Entropy={self.baseline['entropy_score']}{config.SHELL_COLOR_RESET}")
         except Exception as e:
-            logger.critical(f"Gagal mengunci baseline V18.6: {str(e)}")
+            logger.critical(f"Baseline capture failed: {str(e)}")
 
     async def save_raw_response_log_async(self, payload_name: str, request_headers: dict, status_code: int, response_text: str) -> str:
         """Async file write for logs using pre-compiled regex."""
         clean_payload = FILENAME_CLEAN_REGEX.sub('_', payload_name)[:20]
-        file_name = f"raw_v18_{clean_payload}_{int(time.time())}.txt"
+        file_name = f"raw_v2_0_{clean_payload}_{int(time.time())}.txt"
         full_path = os.path.join(config.RAW_LOG_DIR, file_name)
         try:
             import aiofiles
@@ -328,13 +383,12 @@ class CoreAuditor:
                 await f.write(f"=== RAW HTTP REQUEST LOG ===\nURL: {self.target_url}\nMethod: {self.method}\nHeaders: {json.dumps(request_headers)}\n\n")
                 await f.write(f"=== RAW HTTP RESPONSE LOG ===\nStatus: {status_code}\n\nBody:\n{response_text}")
         except ImportError:
-            # Fallback if aiofiles not available
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(f"=== RAW HTTP REQUEST LOG ===\nURL: {self.target_url}\nHeaders: {json.dumps(request_headers)}\n\nBody:\n{response_text}")
         return full_path
 
     def evaluate_heuristic_evidence(self, response_text: str, status_code: int, response_time: float, sent_payload: str, indicators: List[str], evidence_type: str, module_specific_proof: Dict[str, Any]) -> str:
-        """Heuristic evidence evaluation."""
+        """Heuristic evidence evaluation - LAPISAN 3 GATE TRIGGER."""
         verdict = "SECURE"
         technical_reason = "Aplikasi berperilaku normal dalam batas aman pengujian."
         has_response_diff = "response_diff" in indicators
@@ -365,7 +419,7 @@ class CoreAuditor:
             verdict = "CONFIRMED"
 
         if verdict != "SECURE":
-            log_path = os.path.join(config.RAW_LOG_DIR, f"pending_v18_{int(time.time())}.txt")
+            log_path = os.path.join(config.RAW_LOG_DIR, f"evidence_v2_0_{int(time.time())}.txt")
             
             self.master_report["audit_findings_summary"].append({
                 "1_REQUEST_EVIDENCE": {
@@ -390,7 +444,7 @@ class CoreAuditor:
                 "5_MODULE_SPECIFIC_EVIDENCE": module_specific_proof,
                 "raw_http_evidence_file_path": log_path
             })
-            print(f"\033[1;33m[!] AUTONOMOUS EVIDENCE VERDICT: [{verdict}] (Confidence Score: {confidence_score})\033[0m")
+            print(f"{config.SHELL_COLOR_YELLOW}[!] EVIDENCE VERDICT: [{verdict}] (Score: {confidence_score}){config.SHELL_COLOR_RESET}")
             return verdict
         
         return "SECURE"
@@ -398,12 +452,12 @@ class CoreAuditor:
     def save_report(self) -> None:
         """Save report synchronously (called at end of audit)."""
         try:
-            output_name = os.path.join(config.REPORT_DIR, f"audit_v18_enterprise_{int(time.time())}_report.json")
+            output_name = os.path.join(config.REPORT_DIR, f"audit_v2_0_enterprise_{int(time.time())}_report.json")
             with open(output_name, 'w', encoding='utf-8') as f:
                 json.dump(self.master_report, f, indent=4, ensure_ascii=False)
-            print(f"\n\033[0;32m[+] Sukses! Dokumen Forensik V18 disimpan di: {output_name}\033[0m\n")
+            print(f"\n{config.SHELL_COLOR_GREEN}[+] V2.0 Report saved: {output_name}{config.SHELL_COLOR_RESET}\n")
         except IOError as e:
-            logger.critical(f"Gagal total menulis dokumen JSON report: {str(e)}")
+            logger.critical(f"Failed to write report: {str(e)}")
 
 def bypass_cloudflare_just_a_moment(targets: List[str]) -> dict:
     return {}
